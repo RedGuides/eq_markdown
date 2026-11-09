@@ -1,0 +1,35 @@
+[project]
+name = "eq_markdown"
+description = "Python-Markdown extensions for the RedGuides and MacroQuest documentation sites"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+dynamic = ["version"]
+authors = [
+  { name = "Redbot", email = "ask@redguides.com" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Text Processing :: Markup",
+  "Topic :: Text Processing :: Markup :: Markdown",
+]
+dependencies = [
+  "Markdown >=3.6",
+  "pymdown-extensions >=10.0",
+]
+
+[project.urls]
+Repository = "https://github.com/RedGuides/eq_markdown"
+Issues = "https://github.com/RedGuides/eq_markdown/issues"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.sdist]
+include = ["src"]
+
+[build-system]
+requires = ["hatchling >=1.33", "hatch-vcs"]
+build-backend = "hatchling.build"
