@@ -11,6 +11,7 @@ import re
 import xml.etree.ElementTree as etree
 
 from markdown import util
+from markdown.blockprocessors import BlockProcessor
 from markdown.extensions.toc import render_inner_html, slugify, strip_tags, unique
 from markdown.treeprocessors import Treeprocessor
 from pymdownx.blocks import BlocksExtension
@@ -22,7 +23,7 @@ MEMBER_ATTR = "data-member-level"  # marks our headings until MemberHeadings has
 type_level = type_multi(type_string_in([AUTO]), type_ranged_integer(1, 6))
 
 
-def anchor_for(label: str) -> str:
+def anchor_for(label):
     """Link anchor for a member label, needed for the TOC links."""
     return re.sub(r"\s+", "-", label.strip())
 
@@ -38,15 +39,12 @@ class Member(Block):
 
     def on_validate(self, parent):
         """Runs first, type is optional. `int Foo[a b]` has a type, `Foo[a b]` has none."""
-        arg = self.argument.strip()
-        if not arg:
-            return False
-        first, _, rest = arg.partition(" ")
+        first, _, rest = self.argument.partition(" ")
         has_type = rest and "[" not in first
         if has_type:
             self.type_name, self.member = first, rest.strip()
         else:
-            self.type_name, self.member = "", arg
+            self.type_name, self.member = "", self.argument
         return True
 
     def on_markdown(self):
@@ -66,19 +64,28 @@ class Member(Block):
             heading.text = f"[{self.type_name}][{self.type_name}] "
         # AtomicString: shown as written, never parsed as Markdown.
         etree.SubElement(heading, "code").text = util.AtomicString(self.member)
+        self.heading = heading
+        self.parent = parent
 
-        # Blocks applies `attrs` to the returned heading, on_add puts the description in the <dd>.
+        # Return the <dl>, Blocks moves anything after it into the <dd>.
         dl = etree.SubElement(parent, "dl")
         self.dd = etree.SubElement(dl, "dd")
-        return heading
+        return dl
 
     def on_add(self, block):
         return self.dd
 
     def on_end(self, block):
-        # A one-paragraph description drops its <p> wrapper, so no space under the heading.
+        # Blocks applies `attrs` to the returned <dl>, but they're meant for the heading.
+        self.heading.attrib.update(block.attrib)
+        block.attrib.clear()
+
         dd = self.dd
-        if len(dd) == 1 and dd[0].tag == "p":
+        if not len(dd):
+            # No description, no <dl>.
+            self.parent.remove(block)
+        elif len(dd) == 1 and dd[0].tag == "p":
+            # A one-paragraph description drops its <p> wrapper, so no space under the heading.
             p = dd[0]
             # Move the paragraph's text and its inline elements (<code>, <em>...) up into the description.
             dd.text = p.text
@@ -116,6 +123,23 @@ class MemberHeadings(Treeprocessor):
         return name + "-"
 
 
+class DefListIndent(BlockProcessor):
+    """Lets a member sit in a definition list."""
+
+    def test(self, parent, block):
+        procs = self.parser.blockprocessors
+        return "defindent" in procs and block.lstrip(" ").startswith("///") and procs["defindent"].test(parent, block)
+
+    def run(self, parent, blocks):
+        # Join the indented chunks that follow, Blocks only finds the closing /// when it gets them together.
+        tab = " " * self.tab_length
+        chunks = [blocks.pop(0)]
+        while blocks and blocks[0].startswith(tab):
+            chunks.append(blocks.pop(0))
+        blocks.insert(0, "\n\n".join(chunks))
+        self.parser.blockprocessors["defindent"].run(parent, blocks)
+
+
 class MemberExtension(BlocksExtension):
     def __init__(self, level=AUTO):
         """`level`: heading size 1-6, or "auto" to sit one below the heading above."""
@@ -124,6 +148,8 @@ class MemberExtension(BlocksExtension):
 
     def extendMarkdownBlocks(self, md, block_mgr):
         block_mgr.register(Member, {"level": self.level})
+        # Before Blocks (blocks, 89.99) and def_list's own indent (defindent, 85).
+        md.parser.blockprocessors.register(DefListIndent(md.parser), "member_deflist_indent", 89.995)
         # Resize headings after ids. e.g. `## Spawn {#spawn}` which are (attr_list, 8) yet before the contents (toc, 5).
         md.treeprocessors.register(MemberHeadings(md), "member_headings", 7)
 

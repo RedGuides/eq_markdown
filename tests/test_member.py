@@ -104,7 +104,7 @@ def test_body_shapes():
     assert "<dl>\n<dd>one paragraph</dd>\n</dl>" in html
     assert "<dl>\n<dd>\n<p>para one</p>\n<p>para two</p>\n</dd>\n</dl>" in html
     assert "<dl>\n<dd>\n<ul>\n<li>No index= HP lost</li>\n<li>string= counters</li>\n</ul>\n</dd>\n</dl>" in html
-    assert '<h3 id="D">' in html and "<dl>\n<dd></dd>\n</dl>" in html
+    assert re.search(r'<h3 id="D">.*?</h3>\n<h3 id="E">', html)  # no <dl>
     assert re.search(r'<dd>\n<p>text</p>\n<div class="highlight"><pre>.*?<code>code\n</code></pre></div>\n</dd>', html)
 
 
@@ -236,6 +236,45 @@ def test_nested():
     assert {"Level", "Count", "Rooted"} <= {t[0] for t in toc_flat(md)}
 
 
+def test_whitespace_line_inside_details():
+    """include-markdown indents blank lines to four spaces; the description gets both paragraphs."""
+    src = '??? info "Inherited"\n    \n    /// member | int Two\n    para one\n    \n    para two\n    ///\n'
+    html, _ = render(src)
+    assert '<h3 id="Two">' in html and "<dl>\n<dd>\n<p>para one</p>\n<p>para two</p>\n</dd>\n</dl>" in html
+
+
+def test_inside_definition_list():
+    """TLO pages include the datatype's members under `:    <h2>Members</h2>`; text after a blank line must not become code."""
+    src = (
+        "Window datatype.\n:    <h2>Members</h2>\n\n"
+        "    /// member | window Child[name]\n    Find a child.\n\n    *   `name`: a name\n    ///\n\n"
+        "    /// member | int Count\n    count\n    ///\n"
+    )
+    html, _ = render(src)
+    assert "<dd>\n<p>Find a child.</p>\n<ul>\n<li><code>name</code>: a name</li>\n</ul>\n</dd>" in html
+    assert '<h3 id="Count">' in html and "<dd>count</dd>" in html
+
+
+def test_admonitions_inside_definition_list():
+    """datatype-group's MouseOver has a note then examples under `:    <h3>Members</h3>`; both stay in the member, in order."""
+    src = (
+        "Group datatype.\n:    <h3>Members</h3>\n\n"
+        "    /// member | groupmember MouseOver\n    The name.\n\n"
+        "    !!! note\n\n        You can hover.\n\n"
+        '    ??? example "Examples"\n\n        ```\n        /echo hi\n        ```\n    ///\n'
+    )
+    html, _ = render(src)
+    shape = r'<dd>\n<p>The name.</p>\n<div class="admonition note">.*?</div>\n<details class="example">.*?</details>\n</dd>'
+    assert re.search(shape, html, re.S)
+
+
+def test_code_inside_definition_list():
+    """A member under `:    <h2>Members</h2>` with an indented code example; it stays code and the member closes."""
+    src = "Window datatype.\n:    <h2>Members</h2>\n\n    /// member | int Count\n    text\n\n        code here\n    ///\n"
+    html, _ = render(src)
+    assert "<p>text</p>\n<pre><code>code here\n</code></pre>\n</dd>" in html
+
+
 # Same output as renderMember
 
 CASES = [
@@ -260,7 +299,8 @@ CASES = [
 
 @pytest.mark.parametrize("name, type, params, toc_label, desc", CASES)
 def test_identical_to_the_macro(name, type, params, toc_label, desc):
-    old_html, old_md = render(f"## Members\n\n{legacy(name, type, params, toc_label)}\n\n:   {desc}\n{LINKREFS}")
+    old_desc = f"\n\n:   {desc}" if desc else ""
+    old_html, old_md = render(f"## Members\n\n{legacy(name, type, params, toc_label)}{old_desc}\n{LINKREFS}")
     member = f"{name}[{params}]" if params else name
     arg = f"{type} {member}" if type else member
     options = [f"label: {toc_label}"] if toc_label else []
